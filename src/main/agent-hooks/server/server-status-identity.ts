@@ -65,6 +65,9 @@ export function toAgentStatusIpcPayload(
     worktreeId: entry.worktreeId,
     connectionId: entry.connectionId,
     receivedAt: entry.receivedAt,
+    ...(entry.evidenceObservedAt !== undefined
+      ? { evidenceObservedAt: entry.evidenceObservedAt }
+      : {}),
     stateStartedAt: entry.stateStartedAt,
     ...(entry.providerSession ? { providerSession: entry.providerSession } : {}),
     ...(entry.providerSessionOnly ? { providerSessionOnly: true } : {}),

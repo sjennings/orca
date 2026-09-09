@@ -32,7 +32,7 @@ vi.mock('./opencode-go-usage-fetcher', () => ({
   fetchOpenCodeGoRateLimits: vi.fn()
 }))
 
-vi.mock('./minimax-fetcher', () => ({
+vi.mock('./minimax/minimax-fetcher', () => ({
   fetchMiniMaxRateLimits: vi.fn()
 }))
 
@@ -50,6 +50,10 @@ vi.mock('./grok-auth', () => ({
 
 vi.mock('../minimax/minimax-cookie-store', () => ({
   hasMiniMaxSessionCookie: vi.fn(() => false)
+}))
+
+vi.mock('../minimax/minimax-api-key-store', () => ({
+  hasMiniMaxApiKey: vi.fn(() => false)
 }))
 
 function zaiOk(usedPercent: number, updatedAt = Date.now()) {

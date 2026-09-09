@@ -67,7 +67,8 @@ describe('PR workflow parallelism', () => {
     expect(JSON.parse(workflow.jobs.test.with.node_versions)).toEqual(['24'])
     expect(nodeNextWorkflow.jobs.test.uses).toBe('./.github/workflows/unit-tests.yml')
     expect(JSON.parse(nodeNextWorkflow.jobs.test.with.node_versions)).toEqual(['26'])
-    expect(nodeNextWorkflow.on.schedule).toHaveLength(1)
+    // Why: this fork runs the Node-next suite on demand only; scheduled triggers were removed.
+    expect(nodeNextWorkflow.on.schedule).toBeUndefined()
     expect(nodeNextWorkflow.on.workflow_dispatch).toBeNull()
     expect(sharedTest.strategy.matrix.node).toBe('${{ fromJSON(inputs.node_versions) }}')
     expect(sharedTest.strategy.matrix.shard).toEqual(

@@ -120,6 +120,7 @@ export function useStatusBarController(floatingTerminalOpen: boolean) {
     ...settings,
     antigravityUsageConfigured,
     minimaxCookieConfigured: rateLimits.minimaxCookieConfigured,
+    minimaxApiKeyConfigured: rateLimits.minimaxApiKeyConfigured,
     grokAuthConfigured: rateLimits.grokAuthConfigured,
     zaiAuthConfigured: zaiAuthConfigured === true
   }

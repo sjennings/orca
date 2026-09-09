@@ -1,13 +1,9 @@
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { basename, join, type posix } from 'node:path'
-import type {
-  DiscoveredSkill,
-  SkillDiscoverySource,
-  SkillProvider,
-  SkillSourceKind
-} from '../../shared/skills'
+import type { SkillProvider, SkillSourceKind } from '../../shared/skills'
 import type { AgentType } from '../../shared/agent-status-types'
+import type { SkillScanRoot } from './skill-discovery-classification'
 import type { Repo } from '../../shared/repo-types'
 import { getRepoExecutionHostId, LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
 import type { SkillProviderRootOverrides } from './skill-provider-destinations'
@@ -17,42 +13,19 @@ import {
   resolveEnvironmentSkillProviderRoots
 } from './skill-provider-runtime-roots'
 
-export type SkillScanRoot = Omit<SkillDiscoverySource, 'exists' | 'skippedReason'>
+// Why: re-exported so native/WSL discovery keeps one import site for roots and classification.
+export {
+  sortDiscoveredSkills,
+  sortSkillDiscoverySources,
+  sourceKindForSkill,
+  sourceLabelForSkill
+} from './skill-discovery-classification'
+export type { SkillScanRoot } from './skill-discovery-classification'
+
 type SkillDiscoveryPathApi = Pick<typeof posix, 'basename' | 'join'>
 
 export function stablePathId(pathValue: string): string {
   return createHash('sha1').update(pathValue).digest('hex').slice(0, 16)
-}
-
-// Skill classification and ordering are identical for native and WSL discovery;
-// only the path arithmetic differs (node:path vs pathPosix), so both callers
-// share these and pass the matching path adapter.
-type SkillRelativePathApi = { relative: (from: string, to: string) => string; sep: string }
-
-export function sourceKindForSkill(
-  root: SkillScanRoot,
-  skillFilePath: string,
-  pathApi: SkillRelativePathApi
-): SkillSourceKind {
-  if (
-    root.sourceKind === 'home' &&
-    pathApi.relative(root.path, skillFilePath).split(pathApi.sep)[0] === '.system'
-  ) {
-    return 'bundled'
-  }
-  return root.sourceKind
-}
-
-export function sourceLabelForSkill(root: SkillScanRoot, sourceKind: SkillSourceKind): string {
-  return sourceKind === 'bundled' ? `${root.label} bundled` : root.label
-}
-
-export function compareSkills(a: DiscoveredSkill, b: DiscoveredSkill): number {
-  return (
-    a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }) ||
-    a.sourceLabel.localeCompare(b.sourceLabel, undefined, { sensitivity: 'base' }) ||
-    a.skillFilePath.localeCompare(b.skillFilePath)
-  )
 }
 
 function source(

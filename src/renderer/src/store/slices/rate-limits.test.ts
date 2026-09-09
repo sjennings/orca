@@ -37,6 +37,7 @@ describe('createRateLimitSlice', () => {
       minimax: null,
       grok: null,
       minimaxCookieConfigured: false,
+      minimaxApiKeyConfigured: false,
       grokAuthConfigured: true,
       claudeTarget: { runtime: 'host', wslDistro: null },
       codexTarget: { runtime: 'host', wslDistro: null },
