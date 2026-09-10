@@ -640,8 +640,10 @@ module.exports = {
   npmRebuild: true,
   publish: {
     provider: 'github',
-    owner: 'stablyai',
-    repo: devChannelRepo ?? 'orca',
+    // Why: fork release builds set these so the packaged app-update.yml points
+    // at the fork's own releases instead of upstream's; unset keeps stablyai.
+    owner: process.env.ORCA_PUBLISH_OWNER ?? 'stablyai',
+    repo: process.env.ORCA_PUBLISH_REPO ?? (devChannelRepo ?? 'orca'),
     releaseType: devChannelRepo ? 'prerelease' : 'release'
   }
 }

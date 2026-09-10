@@ -101,6 +101,22 @@ ones are safe to delete):
   `...-arm64-mac.zip` — per-build zips
 - `dist/mac/Orca.app`, `dist/mac-arm64/Orca.app` — unpacked apps
 
+## 5. Fork release CI (all platforms, unsigned)
+
+To publish installable builds for every desktop platform to this fork's
+Releases page, dispatch the fork release workflow instead of building locally:
+
+```bash
+gh workflow run fork-client-release.yml --ref main
+```
+
+It builds macOS (dmg/zip, x64 + arm64), Windows (setup exe), and Linux
+(AppImage/deb/rpm, x64 + arm64) in parallel, uploads them to a draft release,
+verifies the updater manifests, then publishes. All artifacts are unsigned —
+per-platform caveats are in the workflow header. Packaged builds check this
+repo's releases for updates (`ORCA_PUBLISH_OWNER`/`ORCA_PUBLISH_REPO` in
+`config/electron-builder.config.cjs`), never upstream's.
+
 ## Troubleshooting
 
 - **Merge conflicts beyond the ingest file** — inspect both sides with
