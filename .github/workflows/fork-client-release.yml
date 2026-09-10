@@ -245,11 +245,23 @@ jobs:
           # Why: app-update.yml bakes the publish target in, so fork builds must
           # check THIS repo's releases for updates, never upstream's.
           export ORCA_PUBLISH_OWNER="${GITHUB_REPOSITORY%%/*}" ORCA_PUBLISH_REPO="${GITHUB_REPOSITORY##*/}"
+          # Why the guard: electron-builder's publisher infers the tag from the
+          # packaged version and CREATES a public release when no draft by that
+          # name exists. Fail here rather than ship a half-asseted release.
+          draft="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)"
+          if [[ "$draft" != "true" ]]; then
+            echo "::error::Draft $TAG not found in $GITHUB_REPOSITORY; refusing to package so the publisher cannot create its own release."
+            exit 1
+          fi
+          # Why the stamp on every leg: the publisher infers the release tag
+          # from the packaged version — an unstamped leg resolves v<package
+          # version>, misses the draft, and publishes rogue (seen live).
+          export ORCA_LOCAL_BUILD_VERSION="$VERSION"
           case "$PLATFORM" in
-            mac)
-              export ORCA_LOCAL_BUILD_VERSION="$VERSION"
-              ;;
             win)
+              # Dev-channel identity: drops the updater publisherName so
+              # unsigned fork-to-fork updates verify. ORCA_ADHOC_BUILD_VERSION
+              # wins over ORCA_LOCAL_BUILD_VERSION in the packaging config.
               export ORCA_WIN_ADHOC=1 ORCA_ADHOC_BUILD_VERSION="$VERSION"
               ;;
           esac
