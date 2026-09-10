@@ -24,9 +24,11 @@ name: Fork Client Release
 # checks this repo's releases and never upstream's.
 #
 # Dispatch-only by design: with no tag trigger, electron-builder's on-tag
-# auto-publish can never fire from a stale config; every packaging step passes
-# --publish never and the release is assembled with gh instead:
-# draft → parallel per-platform uploads → manifest check → publish.
+# auto-publish can never fire from a stale config. Each leg packages with
+# ORCA_PUBLISH_OWNER/REPO pointed at this repo and --publish always, so
+# electron-builder uploads its artifacts AND updater manifests into the
+# pre-created draft — the manifests are not generated at all under
+# --publish never; the publish job then verifies and flips it live.
 #
 #   gh workflow run fork-client-release.yml --ref main
 
@@ -120,7 +122,6 @@ jobs:
             eb_cache_path: |
               ~/Library/Caches/electron
               ~/Library/Caches/electron-builder
-            upload_globs: 'dist/*.dmg dist/*.zip dist/*.blockmap dist/latest-mac.yml'
           # Why windows-2022 and not windows-latest: windows-latest moved to the
           # Windows 2025 / VS 2026 image before node-gyp could detect VS 18,
           # breaking native dependency install. Same pin as release-cut.
@@ -129,19 +130,16 @@ jobs:
             eb_cache_path: |
               ~\AppData\Local\electron\Cache
               ~\AppData\Local\electron-builder\Cache
-            upload_globs: 'dist/*.exe dist/*.blockmap dist/latest.yml'
           - os: ubuntu-latest
             platform: linux-x64
             eb_cache_path: |
               ~/.cache/electron
               ~/.cache/electron-builder
-            upload_globs: 'dist/*.AppImage dist/*.deb dist/*.rpm dist/latest-linux.yml'
           - os: ubuntu-24.04-arm
             platform: linux-arm64
             eb_cache_path: |
               ~/.cache/electron
               ~/.cache/electron-builder
-            upload_globs: 'dist/*.AppImage dist/*.deb dist/*.rpm dist/latest-linux.yml'
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
@@ -237,6 +235,10 @@ jobs:
         shell: bash
         env:
           PLATFORM: ${{ matrix.platform }}
+          GH_TOKEN: ${{ github.token }}
+          # Why: a slow leg can cross electron-builder's release-freshness
+          # window; same escape hatch the dev-channel workflows pass.
+          EP_GH_IGNORE_TIME: 'true'
         run: |
           set -euo pipefail
           export ORCA_BUILD_COMMIT="$SHA"
@@ -263,18 +265,10 @@ jobs:
               export ORCA_LINUX_ARM64_RELEASE=1
               args=(--linux AppImage deb rpm --arm64) ;;
           esac
-          pnpm exec electron-builder --config config/electron-builder.config.cjs "${args[@]}" --publish never
-
-      - name: Upload artifacts to the draft release
-        uses: nick-fields/retry@v4
-        with:
-          timeout_minutes: 20
-          max_attempts: 2
-          retry_wait_seconds: 30
-          command: bash .github/scripts/upload-fork-release-assets.sh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          UPLOAD_GLOBS: ${{ matrix.upload_globs }}
+          # Why --publish always and not never: the updater manifests
+          # (latest*.yml) are only generated on the publish path. The publisher
+          # target is this repo's pre-created draft via ORCA_PUBLISH_* above.
+          pnpm exec electron-builder --config config/electron-builder.config.cjs "${args[@]}" --publish always
 
   publish:
     needs: [version, build]
@@ -310,6 +304,7 @@ jobs:
             latest-mac.yml \
             latest.yml \
             latest-linux.yml \
+            latest-linux-arm64.yml \
             orca-windows-setup.exe \
             orca-macos-x64.dmg \
             orca-macos-arm64.dmg; do
