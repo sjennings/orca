@@ -279,16 +279,6 @@ module.exports = {
     }
   },
   afterPack: async (context) => {
-    // Why: a Linux runner-image glibc bump silently shipped a node-pty pty.node
-    // requiring GLIBC_2.34, crashing the app on startup on Ubuntu 20.04 (#9902).
-    // Fail packaging if any bundled native binary exceeds the supported floor.
-    if (context.electronPlatformName === 'linux') {
-      // Why the arch is passed: symbol-version checks pass happily on a wrong-architecture binary,
-      // so a cross-built slice could ship the host's pty.node and only fail at runtime.
-      verifyLinuxGlibcFloor(context.appOutDir, {
-        targetArch: { 1: 'x64', 3: 'arm64' }[context.arch]
-      })
-    }
     const resourcesDir =
       context.electronPlatformName === 'darwin'
         ? join(
@@ -300,6 +290,21 @@ module.exports = {
         : join(context.appOutDir, 'resources')
     if (!existsSync(resourcesDir)) {
       throw new Error(`Missing packaged resources directory: ${resourcesDir}`)
+    }
+    // Why prune before the glibc-floor scan: supportedArchitectures installs
+    // every @parcel/watcher-<os>-<arch> variant, and the arm64 output dir's own
+    // name makes the scan judge each path by the first arch token it contains,
+    // so the x64 variant this prune deletes anyway reads as a wrong-arch binary.
+    prunePackagedRuntimeNodeModules(resourcesDir, context.electronPlatformName, context.arch)
+    // Why: a Linux runner-image glibc bump silently shipped a node-pty pty.node
+    // requiring GLIBC_2.34, crashing the app on startup on Ubuntu 20.04 (#9902).
+    // Fail packaging if any bundled native binary exceeds the supported floor.
+    if (context.electronPlatformName === 'linux') {
+      // Why the arch is passed: symbol-version checks pass happily on a wrong-architecture binary,
+      // so a cross-built slice could ship the host's pty.node and only fail at runtime.
+      verifyLinuxGlibcFloor(context.appOutDir, {
+        targetArch: { 1: 'x64', 3: 'arm64' }[context.arch]
+      })
     }
     // FpmTarget replaces this with deb/rpm while building those artifacts from the shared app tree.
     if (context.electronPlatformName === 'linux') {
@@ -325,7 +330,6 @@ module.exports = {
       writeMacBuildCompatibility(resourcesDir, { version, commit, architecture })
     }
     stampPackagedCliVersion(resourcesDir, context.packager.appInfo.version)
-    prunePackagedRuntimeNodeModules(resourcesDir, context.electronPlatformName, context.arch)
     verifyPackagedMainRuntimeDeps(resourcesDir)
     // Why: boot the packaged daemon-entry under plain Node, but only for the
     // slice matching the packaging host's arch — daemon-entry.js is JS, yet it
