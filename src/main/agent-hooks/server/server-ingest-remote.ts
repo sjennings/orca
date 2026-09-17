@@ -22,7 +22,7 @@ import {
   canAdmitLegacyAgentStatus,
   olderPeerAgentStatusLegacyMode
 } from '../../../shared/agent-status-legacy-adapter'
-import { isValidPiProviderSessionOnly } from './server-status-identity'
+import { isValidProviderSessionOnly } from './server-status-identity'
 import { AgentHookServerIngestStructured } from './server-ingest-structured'
 
 export abstract class AgentHookServerIngestRemote extends AgentHookServerIngestStructured {
