@@ -1,3 +1,4 @@
+import { preserveFolderUpgradeWorktreePath } from '../../../folder-upgrade-worktree-path'
 import type { WorktreeMeta } from '../../../../shared/worktree/meta-types'
 import { parseWorktreeId, areWorktreePathsEqual, mergeWorktree } from '../../worktree-logic'
 import {
@@ -9,7 +10,7 @@ import type { GitWorktreeInfo, DetectedWorktree, Worktree } from '../../../../sh
 import type { Store } from '../../../persistence/loading-store/store'
 import { getRepoExecutionHostId } from '../../../../shared/execution-host'
 import {
-  readWorktreeMetaForHost,
+  readWorktreeMetaForRepo,
   writeWorktreeMetaForHost
 } from '../../../persistence/host-qualified-worktree-meta'
 import { getRepoOwnedWorktreeMeta } from '../../../worktree-metadata-ownership'
@@ -144,7 +145,9 @@ export function buildDetectedGitWorktrees(
   const isLegacyRepoForVisibility = isLegacyRepoForExternalWorktreeVisibility(repo)
   // Why: a prunable registration has no working directory (issue #8389); only this listing omits it — cleanup flows list separately.
   const liveWorktrees = dedupeWorktreesByPath(
-    gitWorktrees.filter((gitWorktree) => !gitWorktree.prunable)
+    preserveFolderUpgradeWorktreePath(repo, gitWorktrees).filter(
+      (gitWorktree) => !gitWorktree.prunable
+    )
   )
   const worktreeVisibilitySourceMatcher = createWorktreeVisibilitySourceMatcher(
     [repo.path, ...liveWorktrees.map((worktree) => worktree.path)],
@@ -159,7 +162,7 @@ export function buildDetectedGitWorktrees(
     const legacyMeta = allMeta === undefined ? store.getWorktreeMeta?.(worktreeId) : undefined
     const metaById = allMeta ?? (legacyMeta ? { [worktreeId]: legacyMeta } : {})
     const meta =
-      readWorktreeMetaForHost(store, worktreeId, getRepoExecutionHostId(repo)) ??
+      readWorktreeMetaForRepo(store, worktreeId, repo) ??
       getRepoOwnedWorktreeMeta(repo, worktreeId, metaById, repoOwnerCount)
     const worktree = mergeWorktree(repo.id, gitWorktree, meta, repo.displayName)
     const detected = toDetectedWorktree({

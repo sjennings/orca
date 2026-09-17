@@ -18,17 +18,21 @@ type CensusEntry = { method: string; mode: CensusMode; reach: Reachability }
 // assignment-store.ts, in source order. A new site fails this test until it is
 // classified here, which is the point.
 const CENSUS: CensusEntry[] = [
-  { method: 'assignStickyOnce', mode: 'caller', reach: 'both' },
+  // assignStickyOnce is gone from this list: its retry now locks only the row
+  // the host is pinned to (lockCellRows), which is what a sticky refresh
+  // touches. Placement below is the one genuinely fleet-wide decision left.
   { method: 'assignOnce', mode: 'caller', reach: 'both' },
   { method: 'assignOnce', mode: 'caller', reach: 'both' },
   { method: 'assignOnce', mode: 'nowait', reach: 'both' },
   { method: 'assignOnce', mode: 'nowait', reach: 'both' },
   { method: 'assignOnce', mode: 'nowait', reach: 'both' },
   { method: 'refreshDrainMigrationLeasesOnce', mode: 'request', reach: 'request' },
-  // Reachable from neither: changeActivity has no production callers, only tests.
-  { method: 'changeActivity', mode: 'request', reach: 'orphan' },
-  { method: 'acquireActivity', mode: 'request', reach: 'request' },
-  { method: 'activateControl', mode: 'request', reach: 'request' },
+  // changeActivity, acquireActivity, activateControl and
+  // removeSupersededSameCellControls no longer take the inventory: they lock
+  // only the one or two cell rows they touch, in cell_id order (lockCellRows),
+  // so they cannot cycle with placement's ordered inventory lock, and the
+  // 23-row lock there had serialised every reconnect in the fleet behind every
+  // other one.
   { method: 'startEvacuation', mode: 'request', reach: 'request' },
   { method: 'completeEvacuationFromDeadSourceOnce', mode: 'request', reach: 'request' },
   { method: 'completeEvacuationFromDeadSourceOnce', mode: 'nowait', reach: 'request' },
@@ -39,17 +43,40 @@ const CENSUS: CensusEntry[] = [
   { method: 'completeEvacuation', mode: 'nowait', reach: 'both' },
   { method: 'completeEvacuation', mode: 'pool-default', reach: 'both' },
   { method: 'rebalanceDormant', mode: 'request', reach: 'request' },
-  { method: 'startRegionalRehomeCandidate', mode: 'nowait', reach: 'sweep' },
-  { method: 'lockedRegionalRehomeFleetSafety', mode: 'nowait', reach: 'sweep' },
+  { method: 'startRegionalRehomeCandidate', mode: 'nowait', reach: 'request' },
   { method: 'completeRegionalRehomeCandidate', mode: 'nowait', reach: 'sweep' },
   { method: 'abortExpiredRegionalRehomes', mode: 'nowait', reach: 'sweep' },
   { method: 'abortExpiredEvacuations', mode: 'nowait', reach: 'sweep' },
   { method: 'abortExpiredEvacuations', mode: 'nowait', reach: 'sweep' },
   { method: 'releaseExpiredActivityLeases', mode: 'nowait', reach: 'sweep' },
-  { method: 'releaseExpiredActivity', mode: 'nowait', reach: 'sweep' },
-  { method: 'reconcileReservationAccounting', mode: 'pool-default', reach: 'both' },
-  { method: 'leastLoadedCell', mode: 'pool-default', reach: 'both' },
-  { method: 'removeSupersededSameCellControls', mode: 'request', reach: 'request' }
+  { method: 'releaseExpiredActivity', mode: 'nowait', reach: 'sweep' }
+  // reconcileReservationAccounting and leastLoadedCell are gone too: the first
+  // repairs exactly two cells' counters and now holds only those rows, and the
+  // second selects from the inventory its single caller has already locked.
+]
+
+// Every inline `FROM relay_cells ... FOR UPDATE` outside the named lock helpers,
+// in source order: whole-table locks in reconciliation and sticky placement,
+// and single-row locks for a cell the method is already scoped to (heartbeat,
+// fence, drain generation, configuration, or a reservation adjust that runs
+// under a lock its caller already holds). A new inline lock fails the census
+// below until it is listed here; per-connection paths that touch more than one
+// cell go through lockCellRows so the order is fixed.
+const NAMED_LOCK_HELPERS = ['lockCellInventory', 'lockGeneralCellInventory', 'lockCellRows']
+
+const INLINE_CELL_LOCK_SITES = [
+  'reconcileCellsWithOptions',
+  'assignStickyOnce',
+  'recordCellHeartbeat',
+  'attestCellFence',
+  'adoptLegacyCellFence',
+  'commitLegacyCellFenceAdoption',
+  'prepareCellFenceAttempt',
+  'attestCellFenceAttempt',
+  'attestCellFenceAttempt',
+  'configureCell',
+  'assertDrainCellGeneration',
+  'adjustCellReservation'
 ]
 
 // The background sweeps, and nothing else. A method reachable from one of these
@@ -91,9 +118,10 @@ function storeCallGraph(lines: string[]): Map<string, Set<string>> {
   bounds.forEach((method, index) => {
     const end = bounds[index + 1]?.start ?? lines.length
     const names = callees.get(method.name) ?? new Set<string>()
-    for (const call of lines.slice(method.start, end).join('\n').matchAll(
-      /this\.([A-Za-z_][\w]*)\s*\(/g
-    )) {
+    for (const call of lines
+      .slice(method.start, end)
+      .join('\n')
+      .matchAll(/this\.([A-Za-z_][\w]*)\s*\(/g)) {
       names.add(call[1]!)
     }
     callees.set(method.name, names)
@@ -146,9 +174,43 @@ function readCallSites(): { method: string; mode: CensusMode }[] {
 
 describe('cell inventory lock call-site census', () => {
   it('classifies every call site exactly as recorded', () => {
-    expect(readCallSites()).toEqual(
-      CENSUS.map(({ method, mode }) => ({ method, mode }))
+    expect(readCallSites()).toEqual(CENSUS.map(({ method, mode }) => ({ method, mode })))
+  })
+
+  // Why: the census only sees lockCellInventory calls, so a hand-written
+  // `relay_cells ... FOR UPDATE` would escape classification entirely.
+  it('routes every relay_cells row lock through a named lock helper', () => {
+    const lines = storeSource()
+    const rawSites: string[] = []
+    // Whole statements, not a fixed window: a wide column list or a raw
+    // FOR UPDATE inside query() must not slip past.
+    const source = lines.join('\n')
+    const bounds: { name: string; start: number }[] = []
+    lines.forEach((line, index) => {
+      const declaration = DECLARATION.exec(line)
+      if (declaration) bounds.push({ name: declaration[1]!, start: index })
+    })
+    const methodAt = (offset: number): string => {
+      const lineIndex = source.slice(0, offset).split('\n').length - 1
+      let name = '<module>'
+      for (const bound of bounds) if (bound.start <= lineIndex) name = bound.name
+      return name
+    }
+    const tick = String.fromCharCode(96)
+    const statementCall = new RegExp(
+      '\\.(queryLocked|query)\\(\\s*' + tick + '([^' + tick + ']*)' + tick,
+      'g'
     )
+    for (const call of source.matchAll(statementCall)) {
+      const statement = call[2]!
+      if (!/\bFROM\s+relay_cells\b/.test(statement)) continue
+      const locks = call[1] === 'queryLocked' || /\bFOR\s+UPDATE\b/.test(statement)
+      if (!locks) continue
+      const method = methodAt(call.index)
+      if (NAMED_LOCK_HELPERS.includes(method)) continue
+      rawSites.push(method)
+    }
+    expect(rawSites).toEqual(INLINE_CELL_LOCK_SITES)
   })
 
   it('leaves no call site taking the inventory without naming a mode', () => {
